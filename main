@@ -1697,12 +1697,19 @@ takeProfit = input(1.5, title="Take Profit %") / 100
 trailingStop = input(0.5, title="Trailing Stop %") / 100
 
 strategy.exit("Exit", from_entry="Long", limit=strategy.position_avg_price * (1 + takeProfit), trail_points=trailingStop * syminfo.mintick)
-
 // === ОТЛИЧНЫЕ СЕТКИ ОРДЕРОВ ДЛЯ БЫЧЬЕГО И МЕДВЕЖЬЕГО РЫНКА ===
-if bullishMarket
-    strategy.risk.max_position_size(10000)
-else
-    strategy.risk.max_position_size(5000)
+// Выбор рынка вручную (нельзя динамически менять max_position_size)
+marketCondition = input.string("Bullish", options=["Bullish", "Bearish"], title="Market Condition")
+
+// Настройки позиций
+maxSizeBullish = input.float(10000, title="Max Position Size (Bull Market)")
+maxSizeBearish = input.float(5000, title="Max Position Size (Bear Market)")
+
+// Выбор фиксированного значения на основе input
+maxSize = marketCondition == "Bullish" ? maxSizeBullish : maxSizeBearish
+
+// Устанавливаем max_position_size 
+strategy.risk.max_position_size(maxSize)
 
 // === ВИЗУАЛИЗАЦИЯ ===
 plot(ma, color=color.blue, title="Moving Average")
