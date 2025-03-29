@@ -1,3 +1,4 @@
+//@version=5
 // Commited version 390
 // IMPROVEMENTS/TODO:
 //- for better execution time use static bgcolor values
@@ -15,7 +16,7 @@
 
 //@author zendog123
 //@version=5
-strategy(title='Zendog V3 backtest DCA bot 3commas', shorttitle='Zendog V3 DCA', 
+strategy(title='Zendog V3 backtest DCA bot 3commas', shorttitle='Zendog V3 w/QFL YT', 
  overlay=true, max_labels_count=500, pyramiding=99, initial_capital=10000, 
   calc_on_order_fills=false, commission_type=strategy.commission.percent, commission_value=0.075)
 
@@ -36,11 +37,56 @@ f_print(_text) =>
 //----------------------------------------------
 //STRATEGY STUFF STARTS HERE
 
+// Get user input
+basePeriods = input.int(title = "Base periods", tooltip = "Number of periods to look for a low that may form a new base.", defval = 36, minval = 4)
+pumpPeriods = input.int(title = "Pump periods", tooltip = "Number of periods pump is above the low to confirm a new base.", defval = 8, minval = 2)
+pump = input.float(title = "Pump from base (%)", tooltip = "Deal start condition.", defval = 3, step = 0.1, minval = 0) / 100
+baseCrack = input.float(title = "Size of base crack (%)", tooltip = "Deal start condition.", defval = 3, step = 0.1, minval = 0.1) / 100
+
+
+// Show hidden calculations
+showHighest = input.bool(title = "Show highest highs", tooltip = "Shows hidden calculations that are used to find the pump from the base.", defval = false)
+showLowest = input.bool(title = "Show simple lowest lows", tooltip = "Shows hidden calculations that are used to find new bases.", defval = false)
+
+// Check pumpPeriods is not greater than basePeriods and correct if required
+pumpPeriods := pumpPeriods >= basePeriods ? basePeriods - 1 : pumpPeriods
+
+// Declare variables
+var base = float(na)
+var buyLimit = float(na)
+var highestHigh = float(na)
+
+// Find the lowest low
+lowestLow = ta.lowest(low, basePeriods)
+
+// Test if new base
+newBase = lowestLow[pumpPeriods + 1] > lowestLow[pumpPeriods] and lowestLow[pumpPeriods] == lowestLow
+
+// Find the highest high between the base and current
+offsetHigh = ta.highest(high, pumpPeriods)
+highestHigh := newBase or high > highestHigh ? offsetHigh : highestHigh[1]
+
+// Work out current base
+base := newBase ? lowestLow : base[1]
+
+// Test if buy criteria are met and, if so, set a buy limit
+buyLimit := (highestHigh - base) / base > pump and (base - low) / base > baseCrack ? base * (1 - baseCrack) : na
+
+// Option to turn on plot of simple lows and highs
+plot(showLowest ? lowestLow : na, title = "Simple lowest low", color = color.purple)
+plot(showHighest ? highestHigh : na, title = "Simple highest high", color = color.purple)
+
+// Plot base
+plot(base, color = newBase ? color.new(color.white, 100) : color.new(color.blue, 0), style = plot.style_line, offset = 1 - pumpPeriods)
+
+// Plot buy signal
+plotshape(buyLimit, title="Buy flag", text="B", location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.blue, textcolor=color.white)
+
 
 //deal start & stop
 string _tooltip = "RSI-7: Use the builtin RSI-7 indicator (set trigger values down below)\nExternal Indicator: plugin an external indicator. Make sure the indicator plots a value and configure down below the trigger point (greater than X, less than X, equal to X) "
 deal_start_condition = false
-deal_start_type = input.string(defval='RSI-7', title='Deal start type', options=['RSI-7', 'External Indicator'], group='Deal start & end conditions', tooltip=_tooltip)
+deal_start_type = input.string(defval='RSI-7', title='Deal start type', options=['RSI-7', 'External Indicator', 'QFL - Buy'], group='Deal start & end conditions', tooltip=_tooltip)
 
 string _tooltip1 = "Take Profit: End deal when the price reached a % TP\nExternal Indicator: End deal using an external indicator (configure settings below)"
 deal_end_condition = false
@@ -82,6 +128,8 @@ if deal_start_type == 'RSI-7' and rsi_start_operation == '<='
     deal_start_condition := ta.rsi(close, 7) <= rsi_start_value
 else if deal_start_type == 'RSI-7' and rsi_start_operation == '>='
     deal_start_condition := ta.rsi(close, 7) >= rsi_start_value
+else if deal_start_type == 'QFL - Buy'
+    deal_start_condition := buyLimit
     
 //MAYBE FOUND A BUG --> Leave all if's on this level otherwise they do not work
 else if deal_start_type == 'External Indicator' and deal_start_value != -99999 and deal_start_operation == '=' and external_indicator == deal_start_value
@@ -1581,3 +1629,84 @@ if barstate.islastconfirmedhistory
 // f_print(lab)
 //----------------------------------------------------------------
 
+
+
+// === ДОБАВЛЕННЫЕ ФУНКЦИИ ===
+
+// === ПАРАМЕТРЫ ИНДИКАТОРОВ ===
+rsiLength = input(14, title="RSI Length")
+rsiOverbought = input(70, title="RSI Overbought Level")
+rsiOversold = input(30, title="RSI Oversold Level")
+cciLength = input(20, title="CCI Length")
+cciOverbought = input(100, title="CCI Overbought Level")
+cciOversold = input(-100, title="CCI Oversold Level")
+
+// === СКОЛЬЗЯЩАЯ СРЕДНЯЯ И ОПРЕДЕЛЕНИЕ РЫНКА ===
+maLength = input(200, title="Moving Average Length")
+ma = ta.sma(close, maLength)
+bullishMarket = close > ma
+bearishMarket = close < ma
+
+// === ИНДИКАТОРЫ ===
+rsi = ta.rsi(close, rsiLength)
+cci = ta.cci(close, cciLength)
+
+// === УСЛОВИЯ ДЛЯ ПОКУПКИ ===
+buyCCI = cci < cciOversold and cci > rsi
+buyRSI = rsi < rsiOversold
+
+// === ТАБЛИЦА ИНДИКАЦИИ РЫНКА ===
+var label marketLabel = na
+if bar_index % 50 == 0
+    label.delete(marketLabel)
+    marketLabel := label.new(x=bar_index, y=high, text=bullishMarket ? "Bull Market" : "Bear Market", color=bullishMarket ? color.green : color.red, textcolor=color.white)
+
+// === DCA - СТРАХОВОЧНЫЕ ОРДЕРА ===
+safetyOrders = 5
+safetyOrderPercents = array.new_float(safetyOrders, 0)
+safetyOrderAmounts = array.new_float(safetyOrders, 0)
+
+array.set(safetyOrderPercents, 0, 5)  // -5% просадка
+array.set(safetyOrderAmounts, 0, 2000)
+
+array.set(safetyOrderPercents, 1, 10) // -10% просадка
+array.set(safetyOrderAmounts, 1, 3000)
+
+array.set(safetyOrderPercents, 2, 15) // -15% просадка
+array.set(safetyOrderAmounts, 2, 4000)
+
+array.set(safetyOrderPercents, 3, 20) // -20% просадка
+array.set(safetyOrderAmounts, 3, 5000)
+
+array.set(safetyOrderPercents, 4, 25) // -25% просадка
+array.set(safetyOrderAmounts, 4, 6000)
+
+for i = 0 to safetyOrders - 1
+    if close < ta.valuewhen(strategy.position_size > 0, strategy.position_avg_price * (1 - array.get(safetyOrderPercents, i) / 100), 0)
+        strategy.order("DCA " + str.tostring(i), strategy.long, qty=array.get(safetyOrderAmounts, i) / close)
+
+// === ВХОД В ПОКУПКУ (QFL + WAVE) ===
+qflBase = ta.lowest(close, 50) // QFL база
+qflBuy = close < qflBase * 1.05 // Покупка, если цена на 5% ниже базы
+
+if buyCCI or buyRSI or qflBuy
+    strategy.entry("Long", strategy.long)
+
+// === ТРЕЙЛИНГ TAKE PROFIT ===
+takeProfit = input(1.5, title="Take Profit %") / 100
+trailingStop = input(0.5, title="Trailing Stop %") / 100
+
+strategy.exit("Exit", from_entry="Long", limit=strategy.position_avg_price * (1 + takeProfit), trail_points=trailingStop * syminfo.mintick)
+
+// === ОТЛИЧНЫЕ СЕТКИ ОРДЕРОВ ДЛЯ БЫЧЬЕГО И МЕДВЕЖЬЕГО РЫНКА ===
+if bullishMarket
+    strategy.risk.max_position_size(10000)
+else
+    strategy.risk.max_position_size(5000)
+
+// === ВИЗУАЛИЗАЦИЯ ===
+plot(ma, color=color.blue, title="Moving Average")
+hline(rsiOverbought, "RSI Overbought", color=color.red)
+hline(rsiOversold, "RSI Oversold", color=color.green)
+hline(cciOverbought, "CCI Overbought", color=color.red)
+hline(cciOversold, "CCI Oversold", color=color.green)
