@@ -1053,7 +1053,9 @@ if condition_to_cancel_open_orders
 
     //we consider that deal closed with any SO, if not closed with SL
     else if condition_take_profit
-        array.set(statsarray_safety_orders, count_executed_safety_orders, array.get(statsarray_safety_orders, count_executed_safety_orders) + 1)
+
+        if count_executed_safety_orders < array.size(statsarray_safety_orders)
+            array.set(statsarray_safety_orders, count_executed_safety_orders, array.get(statsarray_safety_orders, count_executed_safety_orders) + 1)
         stats_deals_take_profit_finished    := stats_deals_take_profit_finished + 1
 
         // Extracting PNL. This is different calculation for each deal close type
